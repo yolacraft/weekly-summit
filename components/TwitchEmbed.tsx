@@ -9,7 +9,7 @@ export default function TwitchEmbed({ channel }: TwitchEmbedProps) {
     const parent =
         process.env.NODE_ENV === 'development'
             ? 'localhost'
-            : 'deine-domain.de';
+            : 'summit.yolacraft.de';
 
     return (
         <div className="relative w-full h-full bg-gray-800 rounded-lg overflow-hidden border border-gray-700">
