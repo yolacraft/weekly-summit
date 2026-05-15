@@ -62,7 +62,7 @@ export default function HomeClient({
         const fetchData = async () => {
             try {
                 const response = await fetch(
-                    'http://45.93.249.181:8067/api/public/events/latest/live'
+                    'https://summitapi.yolacraft.de/api/public/events/latest/live'
                 );
                 const json = await response.json();
                 if (json.status !== 'success') return;

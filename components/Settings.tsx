@@ -32,7 +32,7 @@ export default function Settings() {
 
     // API URL State
     const [apiUrl, setApiUrl] = useState(
-        'http://45.93.249.181:8067/api/public/events/latest'
+        'https://summitapi.yolacraft.de/api/public/events/latest'
     );
 
     // Data State
