@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
+
 import TwitchEmbed from '@/components/TwitchEmbed';
 import Settings from '@/components/Settings';
 
@@ -33,10 +34,8 @@ export default function HomeClient({
     mappings: string | null;
 }) {
     const [parsedMappings, setParsedMappings] = useState<PlayerMapping[]>([]);
-    const [leadTwitchChannel, setLeadTwitchChannel] = useState<string | null>(null);
 
-    // rightStreams[0] ist für Platz 2 (Auto)
-    // rightStreams[1] & [2] sind für die manuellen Buttons
+    const [leadTwitchChannel, setLeadTwitchChannel] = useState<string | null>(null);
     const [rightStreams, setRightStreams] = useState<string[]>([
         'empty',
         'empty',
@@ -53,37 +52,89 @@ export default function HomeClient({
         completions: [],
     });
 
-    // Mappings initialisieren
+    // mappings from URL
     useEffect(() => {
         setParsedMappings(parseMappings(mappings));
     }, [mappings]);
 
-    // Daten-Abfrage Loop
+    // fetch loop
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const response = await fetch('http://45.93.249.181:8067/api/public/events/latest/live');
+                const response = await fetch(
+                    'http://45.93.249.181:8067/api/public/events/latest/live'
+                );
                 const json = await response.json();
                 if (json.status !== 'success') return;
+
                 setApiData(json.data);
+
+                const { players, timelines, completions } = json.data;
+                const finishedUuids = new Set(completions.map((c: any) => c.uuid));
+
+                let bestScore = -1;
+                let bestTime = Infinity;
+                let bestTwitchName: string | null = null;
+
+                players.forEach((player: any) => {
+                    if (finishedUuids.has(player.uuid)) return;
+
+                    const mapping = parsedMappings.find(
+                        m =>
+                            m.ingameName.toLowerCase() === player.nickname.toLowerCase()
+                    );
+                    if (!mapping) return;
+
+                    const pTimelines = timelines.filter(
+                        (t: any) => t.uuid === player.uuid
+                    );
+
+                    let pMaxScore = 0;
+                    let pBestTime = Infinity;
+
+                    pTimelines.forEach((t: any) => {
+                        const config = SPLIT_CONFIG[t.type];
+                        if (config) {
+                            if (config.score > pMaxScore) {
+                                pMaxScore = config.score;
+                                pBestTime = t.time;
+                            } else if (config.score === pMaxScore) {
+                                pBestTime = Math.min(pBestTime, t.time);
+                            }
+                        }
+                    });
+
+                    if (
+                        pMaxScore > bestScore ||
+                        (pMaxScore === bestScore && pBestTime < bestTime)
+                    ) {
+                        bestScore = pMaxScore;
+                        bestTime = pBestTime;
+                        bestTwitchName = mapping.twitchChannel;
+                    }
+                });
+
+                if (bestTwitchName) setLeadTwitchChannel(bestTwitchName);
             } catch (err) {
-                console.error("Fetch error:", err);
+                console.error(err);
             }
         };
 
         fetchData();
         const interval = setInterval(fetchData, 3000);
         return () => clearInterval(interval);
-    }, []);
+    }, [parsedMappings]);
 
-    // Ranking berechnen (memoized)
     const activePlayers = useMemo(() => {
         const finishedUuids = new Set(apiData.completions.map(c => c.uuid));
 
         return apiData.players
             .filter(p => !finishedUuids.has(p.uuid))
             .map(p => {
-                const pTimelines = apiData.timelines.filter(t => t.uuid === p.uuid);
+                const pTimelines = apiData.timelines.filter(
+                    t => t.uuid === p.uuid
+                );
+
                 let maxScore = 0;
                 let bestTime = Infinity;
                 let currentSplitLabel = 'Started';
@@ -109,91 +160,57 @@ export default function HomeClient({
             });
     }, [apiData]);
 
-    // Automatische Zuweisung von Platz 1 und 2
-    useEffect(() => {
-        if (activePlayers.length > 0) {
-            // Platz 1 -> Main
-            const p1 = activePlayers[0];
-            const m1 = parsedMappings.find(m => m.ingameName.toLowerCase() === p1.nickname.toLowerCase());
-            setLeadTwitchChannel(m1 ? m1.twitchChannel : null);
-
-            // Platz 2 -> Erster Sidebar Slot
-            const p2 = activePlayers[1];
-            const m2 = p2 ? parsedMappings.find(m => m.ingameName.toLowerCase() === p2.nickname.toLowerCase()) : null;
-
-            setRightStreams(prev => {
-                const newState = [...prev];
-                newState[0] = m2 ? m2.twitchChannel : 'empty';
-                return newState;
-            });
-        }
-    }, [activePlayers, parsedMappings]);
-
-    const setManualStream = (index: number, channel: string) => {
+    const setSidebarStream = (index: number, channel: string) => {
         const newStreams = [...rightStreams];
         newStreams[index] = channel;
         setRightStreams(newStreams);
     };
 
     return (
-        <main className="w-screen h-screen bg-neutral-950 p-4 flex flex-col gap-4 overflow-hidden text-neutral-200">
+        <main className="w-screen h-screen bg-neutral-950 p-4 flex flex-col gap-4 overflow-hidden">
+
             <div className="grid grid-cols-3 grid-rows-3 gap-4 flex-grow h-full">
 
-                {/* Main Player (Platz 1) */}
+                {/* Main Stream */}
                 <div className="col-span-2 row-span-2 bg-black rounded-lg overflow-hidden border border-neutral-800 shadow-2xl">
                     {leadTwitchChannel ? (
                         <TwitchEmbed channel={leadTwitchChannel} />
                     ) : (
-                        <div className="h-full flex items-center justify-center text-neutral-500 italic text-sm">
+                        <div className="h-full flex items-center justify-center text-neutral-500 italic">
                             Searching for leader...
                         </div>
                     )}
                 </div>
 
-                {/* Sidebar Players */}
+                {/* Sidebar Streams */}
                 {[0, 1, 2].map(idx => (
                     <div
                         key={idx}
-                        className="col-start-3 bg-black rounded-lg overflow-hidden border border-neutral-800 flex items-center justify-center"
-                        style={{ gridRowStart: idx + 1 }}
+                        className={`col-start-3 row-start-${idx + 1} bg-black rounded-lg overflow-hidden border border-neutral-800`}
                     >
-                        {idx === 0 ? (
-                            // Auto Slot für Platz 2
-                            rightStreams[idx] !== 'empty' ? (
-                                <TwitchEmbed channel={rightStreams[idx]} />
-                            ) : (
-                                <div className="text-neutral-600 italic text-[10px] text-center px-4">
-                                    Waiting for second place...
-                                </div>
-                            )
-                        ) : (
-                            // Manuelle Slots
-                            rightStreams[idx] !== 'empty' ? (
-                                <TwitchEmbed channel={rightStreams[idx]} />
-                            ) : (
-                                <div className="text-neutral-700 text-[10px] uppercase tracking-widest">
-                                    Slot {idx + 1}
-                                </div>
-                            )
-                        )}
+                        <TwitchEmbed channel={rightStreams[idx]} />
                     </div>
                 ))}
 
-                {/* Standings & Controls */}
+                {/* Standings */}
                 <div className="col-span-2 row-start-3 bg-neutral-900/60 rounded-xl p-4 border border-neutral-800 relative flex flex-col min-h-0">
+
                     <div className="flex items-center justify-between mb-3 px-1">
-                        <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-purple-500">
+                        <h2 className="text-white text-[10px] font-black uppercase tracking-[0.3em] text-purple-500">
                             Live Standings
                         </h2>
+
                         <span className="text-[10px] text-neutral-500 uppercase mr-12">
-                            {activePlayers.length} Racing
-                        </span>
+              {activePlayers.length} Racing
+            </span>
                     </div>
 
                     <div className="flex-grow overflow-y-auto custom-scrollbar grid grid-cols-4 gap-x-6 gap-y-2 pr-2">
+
                         {activePlayers.map(player => {
                             const mapping = parsedMappings.find(
-                                m => m.ingameName.toLowerCase() === player.nickname.toLowerCase()
+                                m =>
+                                    m.ingameName.toLowerCase() === player.nickname.toLowerCase()
                             );
 
                             return (
@@ -203,23 +220,25 @@ export default function HomeClient({
                                 >
                                     <div className="flex items-center gap-3 overflow-hidden">
                                         <div className="w-1.5 h-1.5 bg-blue-500 rounded-full shrink-0 animate-pulse" />
+
                                         <div className="flex flex-col truncate">
-                                            <span className="text-white font-bold text-xs truncate">
-                                                {player.nickname}
-                                            </span>
+                      <span className="text-white font-bold text-xs truncate">
+                        {player.nickname}
+                      </span>
                                             <span className="text-[9px] text-neutral-500 uppercase truncate">
-                                                {player.currentSplitLabel}
-                                            </span>
+                        {player.currentSplitLabel}
+                      </span>
                                         </div>
                                     </div>
 
                                     {mapping && (
                                         <div className="flex gap-1 shrink-0">
-                                            {/* Nur Buttons für die manuellen Sidebar-Slots (2 und 3) */}
-                                            {[1, 2].map(slotIdx => (
+                                            {[0, 1, 2].map(slotIdx => (
                                                 <button
                                                     key={slotIdx}
-                                                    onClick={() => setManualStream(slotIdx, mapping.twitchChannel)}
+                                                    onClick={() =>
+                                                        setSidebarStream(slotIdx, mapping.twitchChannel)
+                                                    }
                                                     className="w-6 h-6 flex items-center justify-center bg-neutral-950 border border-neutral-700 hover:bg-purple-600 hover:border-purple-400 text-white text-[10px] font-bold rounded transition-all"
                                                 >
                                                     {slotIdx + 1}
@@ -230,11 +249,13 @@ export default function HomeClient({
                                 </div>
                             );
                         })}
+
                     </div>
 
                     <div className="absolute bottom-4 right-4">
                         <Settings />
                     </div>
+
                 </div>
             </div>
         </main>
