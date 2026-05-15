@@ -35,7 +35,8 @@ export default function HomeClient({
     const [parsedMappings, setParsedMappings] = useState<PlayerMapping[]>([]);
     const [leadTwitchChannel, setLeadTwitchChannel] = useState<string | null>(null);
 
-    // Wir behalten 3 Slots, aber Index 0 wird automatisch belegt
+    // rightStreams[0] ist für Platz 2 (Auto)
+    // rightStreams[1] & [2] sind für die manuellen Buttons
     const [rightStreams, setRightStreams] = useState<string[]>([
         'empty',
         'empty',
@@ -52,11 +53,12 @@ export default function HomeClient({
         completions: [],
     });
 
+    // Mappings initialisieren
     useEffect(() => {
         setParsedMappings(parseMappings(mappings));
     }, [mappings]);
 
-    // Fetch Loop (nur Daten holen)
+    // Daten-Abfrage Loop
     useEffect(() => {
         const fetchData = async () => {
             try {
@@ -65,7 +67,7 @@ export default function HomeClient({
                 if (json.status !== 'success') return;
                 setApiData(json.data);
             } catch (err) {
-                console.error(err);
+                console.error("Fetch error:", err);
             }
         };
 
@@ -74,7 +76,7 @@ export default function HomeClient({
         return () => clearInterval(interval);
     }, []);
 
-    // Ranking berechnen
+    // Ranking berechnen (memoized)
     const activePlayers = useMemo(() => {
         const finishedUuids = new Set(apiData.completions.map(c => c.uuid));
 
@@ -107,15 +109,15 @@ export default function HomeClient({
             });
     }, [apiData]);
 
-    // Automatische Zuweisung für Platz 1 und Platz 2
+    // Automatische Zuweisung von Platz 1 und 2
     useEffect(() => {
         if (activePlayers.length > 0) {
-            // Platz 1 -> Main Stream
+            // Platz 1 -> Main
             const p1 = activePlayers[0];
             const m1 = parsedMappings.find(m => m.ingameName.toLowerCase() === p1.nickname.toLowerCase());
-            if (m1) setLeadTwitchChannel(m1.twitchChannel);
+            setLeadTwitchChannel(m1 ? m1.twitchChannel : null);
 
-            // Platz 2 -> Erster Sidebar Slot (Index 0)
+            // Platz 2 -> Erster Sidebar Slot
             const p2 = activePlayers[1];
             const m2 = p2 ? parsedMappings.find(m => m.ingameName.toLowerCase() === p2.nickname.toLowerCase()) : null;
 
@@ -127,46 +129,60 @@ export default function HomeClient({
         }
     }, [activePlayers, parsedMappings]);
 
-    const setManualSidebarStream = (index: number, channel: string) => {
+    const setManualStream = (index: number, channel: string) => {
         const newStreams = [...rightStreams];
-        newStreams[index] = channel; // index wird hier 1 oder 2 sein
+        newStreams[index] = channel;
         setRightStreams(newStreams);
     };
 
     return (
-        <main className="w-screen h-screen bg-neutral-950 p-4 flex flex-col gap-4 overflow-hidden">
+        <main className="w-screen h-screen bg-neutral-950 p-4 flex flex-col gap-4 overflow-hidden text-neutral-200">
             <div className="grid grid-cols-3 grid-rows-3 gap-4 flex-grow h-full">
 
-                {/* Main Stream (Platz 1) */}
+                {/* Main Player (Platz 1) */}
                 <div className="col-span-2 row-span-2 bg-black rounded-lg overflow-hidden border border-neutral-800 shadow-2xl">
                     {leadTwitchChannel ? (
                         <TwitchEmbed channel={leadTwitchChannel} />
                     ) : (
-                        <div className="h-full flex items-center justify-center text-neutral-500 italic">
+                        <div className="h-full flex items-center justify-center text-neutral-500 italic text-sm">
                             Searching for leader...
                         </div>
                     )}
                 </div>
 
-                {/* Sidebar Streams (Slot 1 ist Auto-Platz 2, Slot 2 & 3 sind manuell) */}
+                {/* Sidebar Players */}
                 {[0, 1, 2].map(idx => (
                     <div
                         key={idx}
-                        className={`col-start-3 row-start-${idx + 1} bg-black rounded-lg overflow-hidden border border-neutral-800 relative`}
+                        className="col-start-3 bg-black rounded-lg overflow-hidden border border-neutral-800 flex items-center justify-center"
+                        style={{ gridRowStart: idx + 1 }}
                     >
-                        {idx === 0 && (
-                            <div className="absolute top-2 left-2 z-10 bg-purple-600 text-white text-[8px] px-1 rounded font-bold uppercase">
-                                Auto: 2nd Place
-                            </div>
+                        {idx === 0 ? (
+                            // Auto Slot für Platz 2
+                            rightStreams[idx] !== 'empty' ? (
+                                <TwitchEmbed channel={rightStreams[idx]} />
+                            ) : (
+                                <div className="text-neutral-600 italic text-[10px] text-center px-4">
+                                    Waiting for second place...
+                                </div>
+                            )
+                        ) : (
+                            // Manuelle Slots
+                            rightStreams[idx] !== 'empty' ? (
+                                <TwitchEmbed channel={rightStreams[idx]} />
+                            ) : (
+                                <div className="text-neutral-700 text-[10px] uppercase tracking-widest">
+                                    Slot {idx + 1}
+                                </div>
+                            )
                         )}
-                        <TwitchEmbed channel={rightStreams[idx]} />
                     </div>
                 ))}
 
-                {/* Standings */}
+                {/* Standings & Controls */}
                 <div className="col-span-2 row-start-3 bg-neutral-900/60 rounded-xl p-4 border border-neutral-800 relative flex flex-col min-h-0">
                     <div className="flex items-center justify-between mb-3 px-1">
-                        <h2 className="text-white text-[10px] font-black uppercase tracking-[0.3em] text-purple-500">
+                        <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-purple-500">
                             Live Standings
                         </h2>
                         <span className="text-[10px] text-neutral-500 uppercase mr-12">
@@ -199,11 +215,11 @@ export default function HomeClient({
 
                                     {mapping && (
                                         <div className="flex gap-1 shrink-0">
-                                            {/* Nur Buttons für Slot 2 und 3 (Indices 1 und 2) */}
+                                            {/* Nur Buttons für die manuellen Sidebar-Slots (2 und 3) */}
                                             {[1, 2].map(slotIdx => (
                                                 <button
                                                     key={slotIdx}
-                                                    onClick={() => setManualSidebarStream(slotIdx, mapping.twitchChannel)}
+                                                    onClick={() => setManualStream(slotIdx, mapping.twitchChannel)}
                                                     className="w-6 h-6 flex items-center justify-center bg-neutral-950 border border-neutral-700 hover:bg-purple-600 hover:border-purple-400 text-white text-[10px] font-bold rounded transition-all"
                                                 >
                                                     {slotIdx + 1}
